@@ -55,7 +55,3 @@ process.on('SIGINT', () => {
 });
 
 console.log('⏳ Serviço iniciado. Pressione Ctrl+C para parar.');
-// Para testar sem backend, adicione no final do main.js:
-setTimeout(() => {
-  printer.printTokenNumber('999');
-}, 5000);
