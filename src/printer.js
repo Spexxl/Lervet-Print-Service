@@ -1,115 +1,166 @@
-const { ThermalPrinter, PrinterTypes } = require('node-thermal-printer');
+require('dotenv').config();
+const fs = require('fs');
+const { SerialPort } = require('serialport');
+const ThermalPrinter = require('node-thermal-printer').printer;
+const PrinterTypes = require('node-thermal-printer').types;
 
+// --- Validação de dependências e .env ---
+function checkDependencies() {
+  try {
+    require.resolve('dotenv');
+    require.resolve('serialport');
+    require.resolve('node-thermal-printer');
+  } catch (err) {
+    console.error('❌ Dependências não instaladas. Execute: npm install dotenv serialport node-thermal-printer');
+    process.exit(1);
+  }
+  if (!fs.existsSync('.env')) {
+    console.error('❌ Arquivo .env não encontrado! Crie um baseado no exemplo fornecido.');
+    process.exit(1);
+  }
+}
+
+// --- Classe Principal ---
 class SimplePrinter {
   constructor() {
+    checkDependencies();
     this.printer = null;
     this.isConnected = false;
-    this.init();
+    this.init()
+      .then(() => {
+        if (!this.isConnected) {
+          console.error('\n❌ Nenhuma impressora pronta!\nVerifique o cabo USB, IP, drivers, e as configurações do .env.');
+        }
+      });
   }
 
-  init() {
-    try {
-      this.printer = new ThermalPrinter({
-        type: PrinterTypes.EPSON,
-        interface: 'COM3',               // Padrão, cliente pode mudar para COM1, COM2, etc.
-        width: 48,
-        characterSet: 'PC850_MULTILINGUAL', // Charset mais compatível
-        removeSpecialCharacters: false,
-      });
-      
-      console.log('🖨️ Impressora inicializada');
-      this.testConnection();
-    } catch (error) {
-      console.error('❌ Erro ao inicializar impressora:', error.message);
-      console.log('💡 Isso é normal se a impressora não estiver conectada');
-      this.printer = null;
+  async init() {
+    const printerMode = (process.env.PRINTER_MODE || 'usb').toLowerCase();
+    if (printerMode === 'usb') {
+      const printerPort = process.env.PRINTER_PORT;
+      if (printerPort) {
+        await this.tryUsbPort(printerPort);
+      } else {
+        await this.scanAllUsbPorts();
+      }
+    } else if (printerMode === 'network') {
+      await this.tryNetworkPrinter();
+    } else {
+      console.error('❌ PRINTER_MODE inválido! Use "usb" ou "network" no .env');
     }
   }
 
-  async testConnection() {
+  async tryUsbPort(portName) {
     try {
-      if (!this.printer) {
-        console.log('⚠️ Impressora não inicializada - aguardando conexão física');
-        return;
-      }
-      
-      this.isConnected = await this.printer.isPrinterConnected();
-      if (this.isConnected) {
-        console.log('✅ Impressora TM-TX20 conectada');
+      const printer = new ThermalPrinter({
+        type: PrinterTypes.EPSON,
+        interface: portName,
+        width: 48,
+        characterSet: 'PC850_MULTILINGUAL',
+        removeSpecialCharacters: false,
+      });
+      const connected = await printer.isPrinterConnected();
+      if (connected) {
+        this.printer = printer;
+        this.isConnected = true;
+        console.log(`✅ Impressora encontrada na porta ${portName}`);
         await this.printTest();
       } else {
-        console.log('⚠️ Impressora não encontrada na COM3');
-        console.log('💡 Verifique: 1) Impressora ligada 2) Cabo USB 3) Driver instalado');
+        throw new Error(`Impressora não encontrada em ${portName}`);
       }
-    } catch (error) {
-      console.error('❌ Erro ao testar conexão:', error.message);
+    } catch (err) {
+      console.error(`❌ Falha ao conectar na porta ${portName}:`, err.message);
+      this.printer = null;
       this.isConnected = false;
     }
   }
 
-  async printTest() {
+  async scanAllUsbPorts() {
     try {
-      this.printer.clear();
-      this.printer.alignCenter();
-      this.printer.bold(true);
-      this.printer.println('TESTE IMPRESSORA');
-      this.printer.bold(false);
-      this.printer.println('Funcionando OK!');
-      this.printer.newLine();
-      this.printer.cut();
-      
-      await this.printer.execute();
-      console.log('✅ Teste de impressão realizado');
+      const ports = await SerialPort.list();
+      if (ports.length === 0) {
+        console.error('❌ Nenhuma porta serial (COM) detectada no sistema!');
+        return;
+      }
+      const portNames = ports.map(port => port.path);
+      console.log('🔎 Portas COM detectadas:', portNames);
+      for (const portName of portNames) {
+        await this.tryUsbPort(portName);
+        if (this.isConnected) break;
+      }
+      if (!this.isConnected) {
+        console.error('❌ Nenhuma impressora encontrada nas portas USB.');
+      }
     } catch (error) {
-      console.error('❌ Erro no teste:', error.message);
+      console.error('❌ Erro ao listar portas seriais:', error.message);
     }
   }
 
-  async printTokenNumber(numero) {
+  async tryNetworkPrinter() {
+    const ip = process.env.PRINTER_IP;
+    const port = process.env.PRINTER_IP_PORT || 9100;
+    if (!ip) {
+      console.error('❌ PRINTER_IP não definido no .env');
+      return;
+    }
+    const interfaceString = `tcp://${ip}:${port}`;
     try {
-      if (!this.printer) {
-        console.log('❌ Impressora não inicializada');
-        return false;
+      const printer = new ThermalPrinter({
+        type: PrinterTypes.EPSON,
+        interface: interfaceString,
+        width: 48,
+        characterSet: 'PC850_MULTILINGUAL',
+        removeSpecialCharacters: false,
+      });
+      const connected = await printer.isPrinterConnected();
+      if (connected) {
+        this.printer = printer;
+        this.isConnected = true;
+        console.log(`✅ Impressora de rede encontrada em ${interfaceString}`);
+        await this.printTest();
+      } else {
+        throw new Error(`Impressora não conectada em ${interfaceString}`);
       }
+    } catch (err) {
+      console.error(`❌ Falha ao conectar na impressora de rede:`, err.message);
+      this.printer = null;
+      this.isConnected = false;
+    }
+  }
 
-      if (!this.isConnected) {
-        console.log('⚠️ Tentando reconectar impressora...');
-        await this.testConnection();
-      }
-
-      if (!this.isConnected) {
-        console.log('❌ Impressora não conectada - token não impresso');
-        return false;
-      }
-
-      this.printer.clear();
-      this.printer.alignCenter();
-      this.printer.setTextQuadArea();
-      this.printer.bold(true);
-      this.printer.println(`TOKEN`);
-      this.printer.setTextSize(3, 3);
-      this.printer.println(`${numero}`);
-      this.printer.bold(false);
-      this.printer.setTextNormal();
-      
-      this.printer.newLine();
-      this.printer.setTextSize(0, 0);
-      const agora = new Date();
-      this.printer.println(agora.toLocaleDateString('pt-BR'));
-      this.printer.println(agora.toLocaleTimeString('pt-BR'));
-      
-      this.printer.newLine();
-      this.printer.newLine();
-      this.printer.cut();
-      
+  // Teste imediato após conexão
+  async printTest() {
+    if (!this.printer) return;
+    this.printer.clear();
+    this.printer.setTextSize(1, 1);
+    this.printer.alignCenter();
+    this.printer.println('*** TESTE DE IMPRESSÃO ***');
+    this.printer.println(new Date().toLocaleString('pt-BR'));
+    this.printer.cut();
+    try {
       await this.printer.execute();
-      
-      console.log(`✅ TOKEN ${numero} IMPRESSO`);
-      return true;
-      
-    } catch (error) {
-      console.error(`❌ Erro ao imprimir token ${numero}:`, error.message);
-      return false;
+      console.log('🖨️ Teste de impressão enviado com sucesso.');
+    } catch (err) {
+      console.error('❌ Falha ao imprimir o teste:', err.message);
+    }
+  }
+
+  // Método de impressão de senha/token exemplo
+  async printTokenNumber(token) {
+    if (!this.printer || !this.isConnected) {
+      console.error('❌ Impressora não conectada.');
+      return;
+    }
+    this.printer.clear();
+    this.printer.setTextSize(2, 2);
+    this.printer.alignCenter();
+    this.printer.println(`Senha: ${token}`);
+    this.printer.cut();
+    try {
+      await this.printer.execute();
+      console.log('🖨️ Senha impressa com sucesso.');
+    } catch (err) {
+      console.error('❌ Erro ao imprimir senha:', err.message);
     }
   }
 }
