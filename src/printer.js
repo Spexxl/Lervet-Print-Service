@@ -1,6 +1,7 @@
 require('dotenv').config();
 const fs = require('fs');
 const { SerialPort } = require('serialport');
+const { execSync } = require('child_process');
 const ThermalPrinter = require('node-thermal-printer').printer;
 const PrinterTypes = require('node-thermal-printer').types;
 
@@ -29,7 +30,7 @@ class SimplePrinter {
     this.init()
       .then(() => {
         if (!this.isConnected) {
-          console.error('\n❌ Nenhuma impressora pronta!\nVerifique o cabo USB, IP, drivers, e as configurações do .env.');
+          console.error('\n❌ Nenhuma impressora pronta!\nVerifique o cabo USB, IP, drivers Windows, e as configurações do .env.');
         }
       });
   }
@@ -45,8 +46,10 @@ class SimplePrinter {
       }
     } else if (printerMode === 'network') {
       await this.tryNetworkPrinter();
+    } else if (printerMode === 'windows') {
+      await this.tryWindowsPrinter();
     } else {
-      console.error('❌ PRINTER_MODE inválido! Use "usb" ou "network" no .env');
+      console.error('❌ PRINTER_MODE inválido! Use "usb", "network" ou "windows" no .env');
     }
   }
 
@@ -128,6 +131,122 @@ class SimplePrinter {
     }
   }
 
+  async tryWindowsPrinter() {
+    const printerName = process.env.PRINTER_NAME;
+    
+    if (printerName) {
+      // Tentar conectar na impressora especificada
+      await this.connectToWindowsPrinter(printerName);
+    } else {
+      // Buscar automaticamente por impressoras disponíveis
+      await this.scanWindowsPrinters();
+    }
+  }
+
+  async getWindowsPrinters() {
+    try {
+      console.log('🔎 Listando impressoras do Windows...');
+      // Usar wmic para listar impressoras do Windows
+      const output = execSync('wmic printer get name', { encoding: 'utf8', timeout: 10000 });
+      const lines = output.split('\n').map(line => line.trim()).filter(line => line && line !== 'Name');
+      
+      console.log('📋 Impressoras encontradas:', lines);
+      return lines;
+    } catch (error) {
+      console.error('❌ Erro ao listar impressoras do Windows:', error.message);
+      return [];
+    }
+  }
+
+  async findCompatiblePrinters(printers) {
+    // Procurar por impressoras que contenham padrões comuns de impressoras térmicas
+    const patterns = ['EPSON', 'TM-', 'TM20', 'TM-T20', 'Receipt', 'Thermal'];
+    const compatible = [];
+
+    for (const printer of printers) {
+      const upperPrinter = printer.toUpperCase();
+      for (const pattern of patterns) {
+        if (upperPrinter.includes(pattern.toUpperCase())) {
+          compatible.push(printer);
+          break;
+        }
+      }
+    }
+
+    return compatible;
+  }
+
+  async connectToWindowsPrinter(printerName) {
+    try {
+      const interfaceString = `printer:${printerName}`;
+      console.log(`🔌 Tentando conectar na impressora Windows: ${printerName}`);
+      
+      const printer = new ThermalPrinter({
+        type: PrinterTypes.EPSON,
+        interface: interfaceString,
+        width: 48,
+        characterSet: 'PC850_MULTILINGUAL',
+        removeSpecialCharacters: false,
+      });
+
+      const connected = await printer.isPrinterConnected();
+      if (connected) {
+        this.printer = printer;
+        this.isConnected = true;
+        console.log(`✅ Impressora Windows encontrada: ${printerName}`);
+        await this.printTest();
+      } else {
+        throw new Error(`Impressora não conectada: ${printerName}`);
+      }
+    } catch (err) {
+      console.error(`❌ Falha ao conectar na impressora Windows "${printerName}":`, err.message);
+      this.printer = null;
+      this.isConnected = false;
+    }
+  }
+
+  async scanWindowsPrinters() {
+    try {
+      const printers = await this.getWindowsPrinters();
+      
+      if (printers.length === 0) {
+        console.error('❌ Nenhuma impressora Windows detectada!');
+        return;
+      }
+
+      // Primeiro, tentar impressoras compatíveis conhecidas
+      const compatiblePrinters = await this.findCompatiblePrinters(printers);
+      
+      if (compatiblePrinters.length > 0) {
+        console.log('🎯 Impressoras compatíveis encontradas:', compatiblePrinters);
+        
+        for (const printerName of compatiblePrinters) {
+          await this.connectToWindowsPrinter(printerName);
+          if (this.isConnected) break;
+        }
+      }
+
+      // Se nenhuma impressora compatível funcionou, tentar todas as outras
+      if (!this.isConnected) {
+        console.log('🔄 Tentando outras impressoras disponíveis...');
+        
+        for (const printerName of printers) {
+          if (!compatiblePrinters.includes(printerName)) {
+            await this.connectToWindowsPrinter(printerName);
+            if (this.isConnected) break;
+          }
+        }
+      }
+
+      if (!this.isConnected) {
+        console.error('❌ Nenhuma impressora Windows compatível encontrada.');
+        console.log('💡 Dica: Defina PRINTER_NAME no .env com o nome exato da impressora.');
+      }
+    } catch (error) {
+      console.error('❌ Erro ao escanear impressoras Windows:', error.message);
+    }
+  }
+
   // Teste imediato após conexão
   async printTest() {
     if (!this.printer) return;
@@ -149,7 +268,7 @@ class SimplePrinter {
   async printTokenNumber(token) {
     if (!this.printer || !this.isConnected) {
       console.error('❌ Impressora não conectada.');
-      return;
+      return false;
     }
     this.printer.clear();
     this.printer.setTextSize(2, 2);
@@ -159,8 +278,10 @@ class SimplePrinter {
     try {
       await this.printer.execute();
       console.log('🖨️ Senha impressa com sucesso.');
+      return true;
     } catch (err) {
       console.error('❌ Erro ao imprimir senha:', err.message);
+      return false;
     }
   }
 }
