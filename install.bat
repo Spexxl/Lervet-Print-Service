@@ -34,7 +34,13 @@ echo npm start
 echo.
 echo Certifique-se que:
 echo 1. A impressora TM-TX20 esta ligada
-echo 2. Cabo USB conectado
+echo 2. Cabo USB conectado OU impressora de rede configurada OU impressora Windows instalada
 echo 3. Driver da impressora instalado
+echo 4. Arquivo .env configurado corretamente
+echo.
+echo Modos de conexao suportados:
+echo - USB/Serial (PRINTER_MODE=usb)
+echo - Rede/TCP (PRINTER_MODE=network) 
+echo - Windows Printer API (PRINTER_MODE=windows)
 echo.
 pause
