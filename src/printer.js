@@ -45,8 +45,10 @@ class SimplePrinter {
       }
     } else if (printerMode === 'network') {
       await this.tryNetworkPrinter();
+    } else if (printerMode === 'tmusb') {
+      await this.tryTmusbPrinter();
     } else {
-      console.error('❌ PRINTER_MODE inválido! Use "usb" ou "network" no .env');
+      console.error('❌ PRINTER_MODE inválido! Use "usb", "network" ou "tmusb" no .env');
     }
   }
 
@@ -123,6 +125,31 @@ class SimplePrinter {
       }
     } catch (err) {
       console.error(`❌ Falha ao conectar na impressora de rede:`, err.message);
+      this.printer = null;
+      this.isConnected = false;
+    }
+  }
+
+  async tryTmusbPrinter() {
+    try {
+      const printer = new ThermalPrinter({
+        type: PrinterTypes.EPSON,
+        interface: 'TMUSB001',
+        width: 48,
+        characterSet: 'PC850_MULTILINGUAL',
+        removeSpecialCharacters: false,
+      });
+      const connected = await printer.isPrinterConnected();
+      if (connected) {
+        this.printer = printer;
+        this.isConnected = true;
+        console.log('✅ Impressora TMUSB001 encontrada');
+        await this.printTest();
+      } else {
+        throw new Error('Impressora TMUSB001 não conectada');
+      }
+    } catch (err) {
+      console.error('❌ Falha ao conectar na impressora TMUSB001:', err.message);
       this.printer = null;
       this.isConnected = false;
     }
