@@ -4,7 +4,7 @@
   "description": "Impressão automática de tokens",
   "main": "src/main.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "node src/main.js",
     "dev": "nodemon index.js",
     "test": "node test-printer.js",
     "install-windows": "npm install --build-from-source",
@@ -22,5 +22,5 @@
   },
   "engines": {
     "node": ">=16.0.0"
-  },
+  }
 }
