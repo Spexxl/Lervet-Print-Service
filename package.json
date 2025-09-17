@@ -4,13 +4,23 @@
   "description": "Impressão automática de tokens",
   "main": "src/main.js",
   "scripts": {
-    "start": "node src/main.js",
-    "install-deps": "npm install"
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "node test-printer.js",
+    "install-windows": "npm install --build-from-source",
+    "install-linux": "sudo npm install --unsafe-perm",
+    "check-ports": "node check-ports.js"
   },
   "dependencies": {
     "socket.io-client": "^4.7.2",
     "node-thermal-printer": "^4.4.4",
     "dotenv": "^16.3.1",
     "serialport": "^12.0.0"
-  }
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
 }
